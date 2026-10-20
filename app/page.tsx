@@ -86,46 +86,41 @@ export default function WelcomePage() {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="border-t border-white/10 px-6 py-8 text-center">
-        <p className="text-sm text-zinc-500">
-          © 2026 ColdStar OTT. All rights reserved.
-        </p>
-
-        {/* OpenPage branding card */}
+      {/* OpenPage branding card — above footer */}
+      <section className="px-6 pb-10">
         <a
           href="https://openpage-lime.vercel.app"
           target="_blank"
           rel="noopener noreferrer"
-          className="group mx-auto mt-6 block max-w-md rounded-xl border border-white/10 bg-white/[0.03] p-5 text-left transition hover:border-lime-400/50 hover:bg-white/[0.06]"
+          className="group mx-auto block max-w-md rounded-xl border border-white/10 bg-white/[0.03] p-5 text-left transition hover:border-lime-400/50 hover:bg-white/[0.06]"
         >
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-lime-400">
-                Discover another brand
-              </p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-lime-400">
+            Discover Another Brand
+          </p>
 
-              <h3 className="mt-2 text-xl font-bold text-white">
-                OpenPage
-              </h3>
-
-              <p className="mt-1 text-sm leading-6 text-zinc-400">
-                Read stories, explore ideas, and discover something new.
-              </p>
-            </div>
+          <div className="mt-2 flex items-center justify-between gap-4">
+            <h2 className="text-xl font-bold text-white">OpenPage</h2>
 
             <span className="text-2xl text-lime-400 transition group-hover:translate-x-1">
               →
             </span>
           </div>
 
+          <p className="mt-1 text-sm leading-6 text-zinc-400">
+            Read stories, explore ideas, and discover something new.
+          </p>
+
           <p className="mt-4 border-t border-white/10 pt-3 text-sm font-semibold text-lime-400">
             Visit OpenPage ↗
           </p>
         </a>
+      </section>
 
-        {/* Admin link remains in footer */}
-        <p className="mt-5 text-xs text-zinc-500">
+      {/* Footer */}
+      <footer className="border-t border-white/10 px-6 py-7 text-center text-sm text-zinc-500">
+        <p>© 2026 ColdStar OTT. All rights reserved.</p>
+
+        <p className="mt-3 text-xs">
           <Link
             href="/admin-login"
             className="transition hover:text-white"
