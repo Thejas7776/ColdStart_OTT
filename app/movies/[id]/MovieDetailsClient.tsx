@@ -65,6 +65,51 @@ async function getPosterUrl(
   return data.signedUrl;
 }
 
+function getYouTubeId(value: string | null | undefined): string | null {
+  if (!value) return null;
+
+  const input = value.trim();
+  if (!input) return null;
+
+  // Support a raw YouTube video ID.
+  if (/^[a-zA-Z0-9_-]{11}$/.test(input)) {
+    return input;
+  }
+
+  try {
+    const url = new URL(
+      /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(input)
+        ? input
+        : `https://${input}`
+    );
+
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    let videoId: string | null = null;
+
+    if (host === "youtu.be") {
+      videoId = url.pathname.split("/").filter(Boolean)[0] ?? null;
+    } else if (
+      host === "youtube.com" ||
+      host === "m.youtube.com" ||
+      host === "music.youtube.com" ||
+      host === "youtube-nocookie.com"
+    ) {
+      videoId =
+        url.searchParams.get("v") ??
+        url.pathname.match(/^\/(?:embed|shorts|live)\/([^/]+)/)?.[1] ??
+        null;
+    } else {
+      return null;
+    }
+
+    return videoId && /^[a-zA-Z0-9_-]{11}$/.test(videoId)
+      ? videoId
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function MovieDetailsClient() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -151,7 +196,9 @@ export default function MovieDetailsClient() {
   if (error || !movie) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-5 bg-[#080b10] px-6 text-white">
-        <p className="text-red-400">{error || "Movie not found."}</p>
+        <p role="alert" className="text-red-400">
+          {error || "Movie not found."}
+        </p>
         <button
           onClick={() => router.push("/home")}
           className="rounded-xl bg-lime-400 px-5 py-3 font-bold text-black"
@@ -162,8 +209,9 @@ export default function MovieDetailsClient() {
     );
   }
 
+  const source = movie.video_source?.trim().toLowerCase();
   const trailerId =
-    movie.video_source === "youtube" ? movie.youtube_video_id : null;
+    source === "youtube" ? getYouTubeId(movie.youtube_video_id) : null;
 
   return (
     <main className="min-h-screen bg-[#080b10] text-white">
@@ -232,18 +280,23 @@ export default function MovieDetailsClient() {
               {movie.description || "Discover this movie on ColdStar OTT."}
             </p>
 
-            {trailerId && (
+            {trailerId ? (
               <button
-                onClick={() => setShowTrailer(!showTrailer)}
+                onClick={() => setShowTrailer((current) => !current)}
+                aria-expanded={showTrailer}
                 className="mt-7 rounded-xl bg-lime-400 px-6 py-4 font-bold text-black transition hover:bg-lime-300"
               >
                 ▶ {showTrailer ? "Hide Trailer" : "Watch Trailer"}
               </button>
+            ) : (
+              <p className="mt-7 rounded-xl border border-white/10 bg-white/[0.03] px-5 py-4 text-sm text-zinc-400">
+                No YouTube trailer has been added for this movie yet.
+              </p>
             )}
 
             <button
               onClick={() => router.push("/home")}
-              className="ml-3 mt-7 rounded-xl border border-white/20 px-6 py-4 font-semibold hover:border-lime-400"
+              className="ml-0 mt-4 rounded-xl border border-white/20 px-6 py-4 font-semibold hover:border-lime-400 sm:ml-3"
             >
               Back to Movies
             </button>
@@ -259,7 +312,7 @@ export default function MovieDetailsClient() {
 
           <div className="aspect-video overflow-hidden rounded-2xl border border-white/10 bg-black">
             <iframe
-              src={`https://www.youtube-nocookie.com/embed/${encodeURIComponent(trailerId)}?autoplay=1`}
+              src={`https://www.youtube-nocookie.com/embed/${trailerId}`}
               title={`${movie.title} trailer`}
               className="h-full w-full"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"

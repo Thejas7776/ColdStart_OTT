@@ -1,66 +1,116 @@
 
 import Link from "next/link";
 
+const movies = [
+  { title: "Midnight Run", genre: "Action" },
+  { title: "Beyond Earth", genre: "Sci-Fi" },
+  { title: "Hidden Truth", genre: "Mystery" },
+  { title: "Last Kingdom", genre: "Adventure" },
+];
+
 export default function WelcomePage() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#080b10] px-6 py-12 text-white">
-      <div className="w-full max-w-lg text-center">
-        <div className="mb-10">
-          <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-3xl bg-lime-400 text-4xl font-black text-black shadow-lg shadow-lime-400/20">
-            C
-          </div>
+    <main className="min-h-screen bg-[#090909] text-white">
+      {/* Header */}
+      <header className="border-b border-white/10">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
+          <Link href="/" className="text-2xl font-bold tracking-tight">
+            COLD<span className="text-lime-400">STAR</span>
+          </Link>
 
-          <h1 className="text-5xl font-black tracking-tight">
-            Cold<span className="text-lime-400">Star</span>
-          </h1>
-
-          <p className="mt-3 text-sm tracking-[0.3em] text-gray-400">
-            YOUR ENTERTAINMENT UNIVERSE
-          </p>
+          <Link
+            href="/login"
+            className="rounded-md border border-zinc-700 px-4 py-2 text-sm transition hover:border-lime-400"
+          >
+            Sign in
+          </Link>
         </div>
+      </header>
 
-        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-7 shadow-2xl sm:p-9">
-          <h2 className="text-2xl font-bold">Welcome to ColdStar</h2>
-
-          <p className="mt-3 mb-8 text-sm leading-6 text-gray-400">
-            Discover movies, explore stories, and enjoy entertainment
-            made for you.
-          </p>
-
-          <div className="space-y-4">
-            <Link
-              href="/signup"
-              className="block w-full rounded-xl bg-lime-400 px-5 py-4 font-bold text-black transition hover:bg-lime-300"
-            >
-              Create User Account
-            </Link>
-
-            <Link
-              href="/login"
-              className="block w-full rounded-xl border border-white/15 px-5 py-4 font-semibold transition hover:border-lime-400 hover:text-lime-400"
-            >
-              User Login
-            </Link>
-
-            <div className="flex items-center gap-4 py-2">
-              <div className="h-px flex-1 bg-white/10" />
-              <span className="text-xs text-gray-500">ADMIN ACCESS</span>
-              <div className="h-px flex-1 bg-white/10" />
-            </div>
-
-            <Link
-              href="/admin-login"
-              className="block w-full rounded-xl bg-white/5 px-5 py-4 font-semibold text-gray-300 transition hover:bg-white/10 hover:text-white"
-            >
-              Admin Login
-            </Link>
-          </div>
-        </div>
-
-        <p className="mt-8 text-xs text-gray-600">
-          © 2026 ColdStar OTT. All rights reserved.
+      {/* Welcome section */}
+      <section className="px-6 py-24 text-center sm:py-32">
+        <p className="text-sm font-semibold tracking-wider text-lime-400">
+          WELCOME TO COLDSTAR OTT
         </p>
-      </div>
+
+        <h1 className="mx-auto mt-5 max-w-2xl text-4xl font-bold tracking-tight sm:text-6xl">
+          Entertainment, made simple.
+        </h1>
+
+        <p className="mx-auto mt-5 max-w-lg text-base leading-7 text-zinc-400">
+          Discover stories, explore new worlds, and find your next
+          favourite movie.
+        </p>
+
+        <div className="mt-8 flex flex-wrap justify-center gap-3">
+          <Link
+            href="/signup"
+            className="rounded-md bg-lime-400 px-6 py-3 font-semibold text-black transition hover:bg-lime-300"
+          >
+            Get Started
+          </Link>
+
+          <Link
+            href="/login"
+            className="rounded-md border border-zinc-700 px-6 py-3 font-semibold transition hover:border-white"
+          >
+            Sign In
+          </Link>
+        </div>
+      </section>
+
+      {/* Movie preview — text only */}
+      <section className="mx-auto max-w-5xl px-6 pb-20">
+        <div className="mb-6">
+          <h2 className="text-2xl font-bold">Explore Movies</h2>
+          <p className="mt-2 text-sm text-zinc-500">
+            A preview of the stories waiting for you.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {movies.map((movie, index) => (
+            <article
+              key={movie.title}
+              className="rounded-lg border border-white/10 bg-white/[0.03] p-5 transition hover:border-lime-400/40"
+            >
+              <p className="text-xs font-medium text-lime-400">
+                {String(index + 1).padStart(2, "0")} · {movie.genre}
+              </p>
+
+              <h3 className="mt-2 text-lg font-semibold">
+                {movie.title}
+              </h3>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="border-t border-white/10 px-6 py-7 text-center text-sm text-zinc-500">
+        <p>© 2026 ColdStar OTT. All rights reserved.</p>
+
+        <p className="mt-3">
+          Discover our blog:{" "}
+          <a
+            href="https://openpage-lime.vercel.app"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-lime-400 transition hover:text-lime-300"
+          >
+            Explore OpenPage →
+          </a>
+        </p>
+
+        <p className="mt-3 text-xs">
+          <Link
+            href="/admin-login"
+            className="transition hover:text-white"
+          >
+            Admin Login
+          </Link>
+        </p>
+      </footer>
     </main>
   );
 }
