@@ -87,22 +87,45 @@ export default function WelcomePage() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-white/10 px-6 py-7 text-center text-sm text-zinc-500">
-        <p>© 2026 ColdStar OTT. All rights reserved.</p>
-
-        <p className="mt-3">
-          Discover our blog:{" "}
-          <a
-            href="https://openpage-lime.vercel.app"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-lime-400 transition hover:text-lime-300"
-          >
-            Explore OpenPage →
-          </a>
+      <footer className="border-t border-white/10 px-6 py-8 text-center">
+        <p className="text-sm text-zinc-500">
+          © 2026 ColdStar OTT. All rights reserved.
         </p>
 
-        <p className="mt-3 text-xs">
+        {/* OpenPage branding card */}
+        <a
+          href="https://openpage-lime.vercel.app"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group mx-auto mt-6 block max-w-md rounded-xl border border-white/10 bg-white/[0.03] p-5 text-left transition hover:border-lime-400/50 hover:bg-white/[0.06]"
+        >
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-lime-400">
+                Discover another brand
+              </p>
+
+              <h3 className="mt-2 text-xl font-bold text-white">
+                OpenPage
+              </h3>
+
+              <p className="mt-1 text-sm leading-6 text-zinc-400">
+                Read stories, explore ideas, and discover something new.
+              </p>
+            </div>
+
+            <span className="text-2xl text-lime-400 transition group-hover:translate-x-1">
+              →
+            </span>
+          </div>
+
+          <p className="mt-4 border-t border-white/10 pt-3 text-sm font-semibold text-lime-400">
+            Visit OpenPage ↗
+          </p>
+        </a>
+
+        {/* Admin link remains in footer */}
+        <p className="mt-5 text-xs text-zinc-500">
           <Link
             href="/admin-login"
             className="transition hover:text-white"
