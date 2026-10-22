@@ -443,12 +443,7 @@ useEffect(() => {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <Link
-              href="/admin"
-              className="rounded-xl border border-white/15 px-4 py-2 text-sm hover:bg-white/10"
-            >
-              ← Dashboard
-            </Link>
+           
             <Link
               href="/home"
               className="rounded-xl bg-lime-400 px-4 py-2 text-sm font-bold text-black hover:bg-lime-300"
@@ -457,6 +452,13 @@ useEffect(() => {
             </Link>
           </div>
         </header>
+
+        <Link
+  href="/home"
+  className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm font-medium text-white transition hover:border-lime-400 hover:text-lime-400"
+>
+  ← Back to Home
+</Link>
 
         {message && (
           <div className="mb-5 rounded-xl border border-lime-400/30 bg-lime-400/10 p-4 text-sm text-lime-200">

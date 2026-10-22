@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -18,30 +19,10 @@ type Movie = {
   emoji?: string | null;
 };
 
-const localPosters: Record<string, string> = {
-  "777 charlie": "/posters/777-charlie.jpg",
-  kantara: "/posters/kantara.jpg",
-  kgf: "/posters/kgf.jpg",
-  "kirik party": "/posters/kirik-party.jpg",
-  "sapta sagara": "/posters/sapta-sagaradaache-ello.jpg",
-  ugramm: "/posters/ugramm.jpg",
-  ramayana: "/posters/rama.jpg",
-};
-
-function getLocalPoster(title: string): string | null {
-  const normalizedTitle = title.toLowerCase().trim();
-
-  const match = Object.entries(localPosters).find(([name]) =>
-    normalizedTitle.includes(name)
-  );
-
-  return match?.[1] ?? null;
-}
-
 async function getPosterUrl(path: string | null | undefined) {
   if (!path) return null;
 
-  // Local public-folder paths and complete URLs need no signing.
+  // Direct URLs and paths inside the public folder.
   if (
     path.startsWith("https://") ||
     path.startsWith("http://") ||
@@ -50,7 +31,7 @@ async function getPosterUrl(path: string | null | undefined) {
     return path;
   }
 
-  // Create a temporary URL for posters stored in Supabase.
+  // Generate a temporary URL for a poster in Supabase Storage.
   const { data, error } = await supabase.storage
     .from("movie-posters")
     .createSignedUrl(path, 3600);
@@ -70,6 +51,10 @@ export default function HomePage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [checkingUser, setCheckingUser] = useState(true);
+  const [adminMenuOpen, setAdminMenuOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,6 +71,19 @@ export default function HomePage() {
           return;
         }
 
+        // Check the existing admin role.
+        const { data: profile, error: profileError } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (cancelled) return;
+
+        setIsAdmin(!profileError && profile?.role === "admin");
+        setCheckingUser(false);
+
+        // Load movie records.
         const { data, error: moviesError } = await supabase
           .from("movies")
           .select("*")
@@ -97,21 +95,12 @@ export default function HomePage() {
 
         const movieList = (data ?? []) as Movie[];
 
+        // Load each movie's poster.
         const moviesWithPosters = await Promise.all(
-          movieList.map(async (movie) => {
-            const localPoster = getLocalPoster(movie.title);
-
-            // For Ramayana and other mapped movies, prefer the local
-            // poster so a missing Supabase file cannot break the image.
-            const posterUrl = localPoster
-              ? localPoster
-              : await getPosterUrl(movie.poster_url);
-
-            return {
-              ...movie,
-              poster_display_url: posterUrl,
-            };
-          })
+          movieList.map(async (movie) => ({
+            ...movie,
+            poster_display_url: await getPosterUrl(movie.poster_url),
+          }))
         );
 
         if (!cancelled) {
@@ -126,6 +115,7 @@ export default function HomePage() {
       } finally {
         if (!cancelled) {
           setLoading(false);
+          setCheckingUser(false);
         }
       }
     }
@@ -158,22 +148,128 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen bg-[#080b10] text-white">
-      <header className="sticky top-0 z-10 border-b border-white/10 bg-[#080b10]/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-5">
+      <header className="sticky top-0 z-20 border-b border-white/10 bg-[#080b10]/95 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4">
           <button
+            type="button"
             onClick={() => router.push("/home")}
             className="text-2xl font-black tracking-tight"
           >
             COLD<span className="text-lime-400">STAR</span>
           </button>
 
-          <button
-            onClick={handleLogout}
-            className="rounded-lg border border-white/15 px-4 py-2 text-sm hover:border-lime-400 hover:text-lime-400"
-          >
-            Log out
-          </button>
+          <nav className="hidden items-center gap-5 md:flex">
+            <Link
+              href="/home"
+              className="text-sm transition hover:text-lime-400"
+            >
+              Home
+            </Link>
+
+            {isAdmin && !checkingUser && (
+              <div className="relative">
+                <button
+                  type="button"
+                  aria-expanded={adminMenuOpen}
+                  onClick={() => setAdminMenuOpen((open) => !open)}
+                  className="flex items-center gap-2 rounded-lg bg-lime-400 px-4 py-2 text-sm font-semibold text-black transition hover:bg-lime-300"
+                >
+                  Admin Tools
+                  <span aria-hidden="true">
+                    {adminMenuOpen ? "▲" : "▼"}
+                  </span>
+                </button>
+
+                {adminMenuOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-56 overflow-hidden rounded-xl border border-white/10 bg-[#121720] p-2 shadow-2xl">
+                    <Link
+                      href="/admin/movies"
+                      onClick={() => setAdminMenuOpen(false)}
+                      className="block rounded-lg px-4 py-3 text-sm transition hover:bg-white/10 hover:text-lime-400"
+                    >
+                      🎬 Manage Movies
+                    </Link>
+
+                    <a
+                      href="/admin/blog"
+                      rel="noopener noreferrer"
+                      onClick={() => setAdminMenuOpen(false)}
+                      className="block rounded-lg px-4 py-3 text-sm transition hover:bg-white/10 hover:text-lime-400"
+                    >
+                      📰 Manage OpenPage
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="rounded-lg border border-white/15 px-4 py-2 text-sm transition hover:border-lime-400 hover:text-lime-400"
+            >
+              Log out
+            </button>
+          </nav>
+
+          <div className="md:hidden">
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen((open) => !open)}
+              aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={mobileMenuOpen}
+              className="rounded-lg border border-white/15 px-3 py-2 text-sm"
+            >
+              {mobileMenuOpen ? "Close" : "Menu"}
+            </button>
+          </div>
         </div>
+
+        {mobileMenuOpen && (
+          <div className="space-y-2 border-t border-white/10 px-5 py-4 md:hidden">
+            <Link
+              href="/home"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block rounded-lg px-3 py-3 text-sm hover:bg-white/10"
+            >
+              Home
+            </Link>
+
+            {isAdmin && !checkingUser && (
+              <div className="rounded-xl border border-lime-400/20 p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-lime-400">
+                  Admin Tools
+                </p>
+
+                <Link
+                  href="/admin/movies"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="block rounded-lg px-3 py-3 text-sm hover:bg-white/10"
+                >
+                  🎬 Manage Movies
+                </Link>
+
+                <a
+                  href="https://openpage-lime.vercel.app/admin"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="block rounded-lg px-3 py-3 text-sm hover:bg-white/10"
+                >
+                  📰 Manage OpenPage
+                </a>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="w-full rounded-lg border border-white/15 px-3 py-3 text-left text-sm hover:border-lime-400 hover:text-lime-400"
+            >
+              Log out
+            </button>
+          </div>
+        )}
       </header>
 
       <section className="mx-auto max-w-7xl px-5 py-12">
@@ -194,7 +290,7 @@ export default function HomePage() {
             <input
               type="search"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(event) => setSearch(event.target.value)}
               placeholder="Search movies or genres..."
               className="w-full rounded-xl border border-white/15 bg-black/40 px-5 py-4 outline-none focus:border-lime-400"
             />
@@ -203,7 +299,6 @@ export default function HomePage() {
 
         <div className="mb-6 flex items-center justify-between">
           <h2 className="text-2xl font-bold">Explore Movies</h2>
-
           <span className="text-sm text-gray-500">
             {filteredMovies.length} movies
           </span>
@@ -214,61 +309,54 @@ export default function HomePage() {
             Loading your movies...
           </p>
         )}
+
         {!loading && error && (
           <p role="alert" className="py-12 text-center text-red-400">
             {error}
           </p>
         )}
+
         {!loading && !error && filteredMovies.length === 0 && (
           <p className="py-12 text-center text-gray-400">
             No movies found. Try another search.
           </p>
         )}
+
         {!loading && !error && filteredMovies.length > 0 && (
           <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {filteredMovies.map((movie) => {
-              const poster =
-                movie.poster_display_url ||
-                getLocalPoster(movie.title);
+              const poster = movie.poster_display_url;
 
               return (
                 <button
                   key={movie.id}
+                  type="button"
                   onClick={() => router.push(`/movies/${movie.id}`)}
                   className="group overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] text-left transition hover:-translate-y-1 hover:border-lime-400/60"
                 >
                   <div className="relative aspect-[3/4] overflow-hidden bg-[#151a20]">
-                    <Image
-                      src={poster || ""}
-                      alt={`${movie.title} poster`}
-                      width={300}
-                      height={400}
-                      unoptimized
-                      onError={(event) => {
-                        const image = event.currentTarget;
-                        const localPoster = getLocalPoster(movie.title);
+                    {poster && (
+                      <Image
+                        src={poster}
+                        alt={`${movie.title} poster`}
+                        width={300}
+                        height={400}
+                        unoptimized
+                        onError={(event) => {
+                          event.currentTarget.style.display = "none";
 
-                        // If the current image fails, try the local poster.
-                        if (
-                          localPoster &&
-                          !image.src.endsWith(localPoster)
-                        ) {
-                          image.onerror = null;
-                          image.src = localPoster;
-                          return;
-                        }
+                          const placeholder =
+                            event.currentTarget.nextElementSibling as
+                              | HTMLElement
+                              | null;
 
-                        image.style.display = "none";
-
-                        const placeholder =
-                          image.nextElementSibling as HTMLElement | null;
-
-                        if (placeholder) {
-                          placeholder.style.display = "flex";
-                        }
-                      }}
-                      className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                    />
+                          if (placeholder) {
+                            placeholder.style.display = "flex";
+                          }
+                        }}
+                        className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                      />
+                    )}
 
                     <span
                       className="absolute inset-0 items-center justify-center text-6xl"

@@ -89,7 +89,7 @@ export default function WelcomePage() {
       {/* OpenPage branding card — above footer */}
       <section className="px-6 pb-10">
         <a
-          href="https://openpage-lime.vercel.app"
+          href=""
           target="_blank"
           rel="noopener noreferrer"
           className="group mx-auto block max-w-md rounded-xl border border-white/10 bg-white/[0.03] p-5 text-left transition hover:border-lime-400/50 hover:bg-white/[0.06]"
@@ -121,12 +121,7 @@ export default function WelcomePage() {
         <p>© 2026 ColdStar OTT. All rights reserved.</p>
 
         <p className="mt-3 text-xs">
-          <Link
-            href="/admin-login"
-            className="transition hover:text-white"
-          >
-            Admin Login
-          </Link>
+
         </p>
       </footer>
     </main>
