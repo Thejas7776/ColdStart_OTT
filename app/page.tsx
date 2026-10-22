@@ -89,7 +89,7 @@ export default function WelcomePage() {
       {/* OpenPage branding card — above footer */}
       <section className="px-6 pb-10">
         <a
-          href=""
+          href="https://openpage-lime.vercel.app/"
           target="_blank"
           rel="noopener noreferrer"
           className="group mx-auto block max-w-md rounded-xl border border-white/10 bg-white/[0.03] p-5 text-left transition hover:border-lime-400/50 hover:bg-white/[0.06]"
