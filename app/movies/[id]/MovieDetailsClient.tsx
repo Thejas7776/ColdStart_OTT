@@ -1,25 +1,17 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import {
+  getCachedMovie,
+  setCachedMovie,
+  type CachedMovie,
+} from "@/lib/movie-cache";
 
-type Movie = {
-  id: string | number;
-  title: string;
-  description?: string | null;
-  genre?: string | null;
-  release_year?: number | null;
-  duration?: string | number | null;
-  rating?: string | number | null;
-  emoji?: string | null;
-  poster_url?: string | null;
-  youtube_video_id?: string | null;
-  video_source?: string | null;
-  video_path?: string | null;
-};
+type Movie = CachedMovie;
 
 const localPosters: Record<string, string> = {
   "777 charlie": "/posters/777-charlie.jpg",
@@ -115,11 +107,15 @@ export default function MovieDetailsClient() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params.id;
+  const cachedMovie = getCachedMovie(id);
+  const hadCachedMovie = useRef(cachedMovie !== null);
 
-  const [movie, setMovie] = useState<Movie | null>(null);
-  const [poster, setPoster] = useState<string | null>(null);
+  const [movie, setMovie] = useState<Movie | null>(cachedMovie);
+  const [poster, setPoster] = useState<string | null>(
+    cachedMovie?.poster_display_url ?? null
+  );
   const [uploadedVideoUrl, setUploadedVideoUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(cachedMovie === null);
   const [error, setError] = useState("");
   const [showTrailer, setShowTrailer] = useState(false);
 
@@ -129,7 +125,7 @@ export default function MovieDetailsClient() {
     async function loadMovie() {
       try {
         const [authResult, movieResult] = await Promise.all([
-          supabase.auth.getUser(),
+          supabase.auth.getSession(),
           supabase
             .from("movies")
             .select("*")
@@ -138,9 +134,10 @@ export default function MovieDetailsClient() {
         ]);
 
         const {
-          data: { user },
+          data: { session },
           error: authError,
         } = authResult;
+        const user = session?.user;
         if (authError || !user) {
           router.replace("/login");
           return;
@@ -156,40 +153,45 @@ export default function MovieDetailsClient() {
 
         const foundMovie = movieResult.data as Movie;
         const localPoster = getLocalPoster(foundMovie.title);
-        const posterUrl =
-          localPoster || (await getPosterUrl(foundMovie.poster_url));
-        let videoUrl: string | null = null;
-
-        if (
+        const posterRequest = localPoster
+          ? Promise.resolve(localPoster)
+          : getPosterUrl(foundMovie.poster_url);
+        const videoRequest =
           foundMovie.video_source?.trim().toLowerCase() === "upload" &&
           foundMovie.video_path
-        ) {
-          if (/^https?:\/\//i.test(foundMovie.video_path)) {
-            videoUrl = foundMovie.video_path;
-          } else {
-            const { data: videoData, error: videoError } =
-              await supabase.storage
-                .from("movie-videos")
-                .createSignedUrl(foundMovie.video_path, 3600);
-
-            if (videoError) {
-              throw new Error(
-                `Could not access the uploaded video: ${videoError.message}`
-              );
-            }
-            videoUrl = videoData.signedUrl;
-          }
-        }
+            ? /^https?:\/\//i.test(foundMovie.video_path)
+              ? Promise.resolve(foundMovie.video_path)
+              : supabase.storage
+                  .from("movie-videos")
+                  .createSignedUrl(foundMovie.video_path, 3600)
+                  .then(({ data, error }) => {
+                    if (error) {
+                      throw new Error(
+                        `Could not access the uploaded video: ${error.message}`
+                      );
+                    }
+                    return data.signedUrl;
+                  })
+            : Promise.resolve(null);
+        const [posterUrl, videoUrl] = await Promise.all([
+          posterRequest,
+          videoRequest,
+        ]);
 
         if (!cancelled) {
+          const movieWithPoster = {
+            ...foundMovie,
+            poster_display_url: posterUrl,
+          };
           setMovie(foundMovie);
           setPoster(posterUrl);
           setUploadedVideoUrl(videoUrl);
+          setCachedMovie(movieWithPoster);
         }
       } catch (err) {
         console.error("Could not load movie:", err);
 
-        if (!cancelled) {
+        if (!cancelled && !hadCachedMovie.current) {
           setError(
             err instanceof Error
               ? err.message

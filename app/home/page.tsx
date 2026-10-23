@@ -6,51 +6,21 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import {
+  getCachedMovies,
+  setCachedMovies,
+  type CachedMovie,
+} from "@/lib/movie-cache";
 
-type Movie = {
-  id: string | number;
-  title: string;
-  description?: string | null;
-  genre?: string | null;
-  release_year?: number | null;
-  rating?: number | string | null;
-  poster_url?: string | null;
-  poster_display_url?: string | null;
-  emoji?: string | null;
-};
-
-async function getPosterUrl(path: string | null | undefined) {
-  if (!path) return null;
-
-  // Direct URLs and paths inside the public folder.
-  if (
-    path.startsWith("https://") ||
-    path.startsWith("http://") ||
-    path.startsWith("/")
-  ) {
-    return path;
-  }
-
-  // Generate a temporary URL for a poster in Supabase Storage.
-  const { data, error } = await supabase.storage
-    .from("movie-posters")
-    .createSignedUrl(path, 3600);
-
-  if (error) {
-    console.error("Could not load poster:", path, error.message);
-    return null;
-  }
-
-  return data.signedUrl;
-}
+type Movie = CachedMovie;
 
 export default function HomePage() {
   const router = useRouter();
 
-  const [movies, setMovies] = useState<Movie[]>([]);
+  const [movies, setMovies] = useState<Movie[]>(() => getCachedMovies() ?? []);
   const [search, setSearch] = useState("");
   const [selectedGenre, setSelectedGenre] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => getCachedMovies() === null);
   const [error, setError] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [checkingUser, setCheckingUser] = useState(true);
@@ -63,11 +33,11 @@ export default function HomePage() {
     async function loadMovies() {
       try {
         const {
-          data: { user },
+          data: { session },
           error: authError,
-        } = await supabase.auth.getUser();
+        } = await supabase.auth.getSession();
 
-        if (authError || !user) {
+        if (authError || !session?.user) {
           router.replace("/login");
           return;
         }
@@ -76,7 +46,7 @@ export default function HomePage() {
           supabase
             .from("profiles")
             .select("role")
-            .eq("id", user.id)
+            .eq("id", session.user.id)
             .maybeSingle(),
           supabase
             .from("movies")
@@ -97,16 +67,56 @@ export default function HomePage() {
 
         const movieList = (moviesResult.data ?? []) as Movie[];
 
-        // Load each movie's poster.
-        const moviesWithPosters = await Promise.all(
-          movieList.map(async (movie) => ({
-            ...movie,
-            poster_display_url: await getPosterUrl(movie.poster_url),
-          }))
+        const signedPaths = Array.from(
+          new Set(
+            movieList
+              .map((movie) => movie.poster_url)
+              .filter(
+                (path): path is string =>
+                  typeof path === "string" &&
+                  path.length > 0 &&
+                  !/^https?:\/\//i.test(path) &&
+                  !path.startsWith("/")
+              )
+          )
         );
+        const signedUrls = new Map<string, string>();
+
+        if (signedPaths.length > 0) {
+          const { data, error: signingError } = await supabase.storage
+            .from("movie-posters")
+            .createSignedUrls(signedPaths, 3600);
+
+          if (signingError) {
+            console.error("Could not sign movie posters:", signingError.message);
+          } else {
+            data.forEach((item) => {
+              if (item.path && item.signedUrl) {
+                signedUrls.set(item.path, item.signedUrl);
+              } else if (item.error) {
+                console.error(
+                  "Could not sign movie poster:",
+                  item.path,
+                  item.error
+                );
+              }
+            });
+          }
+        }
+
+        const moviesWithPosters = movieList.map((movie) => ({
+          ...movie,
+          poster_display_url: movie.poster_url
+            ? /^https?:\/\//i.test(movie.poster_url) ||
+              movie.poster_url.startsWith("/")
+              ? movie.poster_url
+              : signedUrls.get(movie.poster_url) ?? null
+            : null,
+        })) as Movie[];
 
         if (!cancelled) {
           setMovies(moviesWithPosters);
+          setCachedMovies(moviesWithPosters);
         }
       } catch (err) {
         console.error("Loading movies failed:", err);

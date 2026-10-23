@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 type Metric = {
@@ -25,7 +25,6 @@ const sections = [
     status: "published",
   },
   { label: "Page Views", table: "openpage_page_views", status: null },
-  { label: "Click Events", table: "openpage_click_events", status: null },
   { label: "User Profiles", table: "profiles", status: null },
   { label: "Feedback Entries", table: "openpage_feedback", status: null },
 ] as const;
@@ -37,6 +36,22 @@ export default function BlogPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [articles, setArticles] = useState<PublishedArticle[]>([]);
   const [articlesError, setArticlesError] = useState<string | null>(null);
+  const [editingArticle, setEditingArticle] = useState<{
+    id: string;
+    title: string;
+    category: string;
+    author_name: string;
+  } | null>(null);
+  const [savingArticleId, setSavingArticleId] = useState<string | null>(null);
+  const [deletingArticleId, setDeletingArticleId] = useState<string | null>(null);
+  const [articleActionError, setArticleActionError] = useState<string | null>(
+    null
+  );
+  const [articleActionMessage, setArticleActionMessage] = useState<
+    string | null
+  >(null);
+  const [realtimeConnected, setRealtimeConnected] = useState(false);
+  const refreshInProgress = useRef(false);
 
   const fetchAnalytics = useCallback(async () => {
     const [results, articleResult] = await Promise.all([
@@ -76,50 +91,217 @@ export default function BlogPage() {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadAnalytics = async () => {
-      try {
-        const result = await fetchAnalytics();
-
-        setMetrics(result.metrics);
-        setArticles(result.articles);
-        setArticlesError(result.articlesError);
-        setLastUpdated(new Date().toLocaleTimeString());
-        setLoadError(null);
-      } catch {
-        if (!cancelled) setLoadError("Unable to load blog analytics.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-
-    void loadAnalytics();
-    const refreshTimer = window.setInterval(() => {
-      void loadAnalytics();
-    }, 30_000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(refreshTimer);
-    };
-  }, [fetchAnalytics]);
-
-  const refreshAnalytics = async () => {
-    setLoading(true);
+  const refreshAnalytics = useCallback(async (showLoading = false) => {
+    if (refreshInProgress.current) return;
+    refreshInProgress.current = true;
+    if (showLoading) setLoading(true);
     setLoadError(null);
-
     try {
       const result = await fetchAnalytics();
       setMetrics(result.metrics);
       setArticles(result.articles);
       setArticlesError(result.articlesError);
       setLastUpdated(new Date().toLocaleTimeString());
-    } catch {
+    } catch (error) {
+      console.error("Refreshing blog analytics failed:", error);
       setLoadError("Unable to load blog analytics.");
     } finally {
       setLoading(false);
+      refreshInProgress.current = false;
+    }
+  }, [fetchAnalytics]);
+
+  useEffect(() => {
+    const initialRefreshTimer = window.setTimeout(() => {
+      void refreshAnalytics();
+    }, 0);
+    let eventRefreshTimer: number | undefined;
+
+    const refreshTimer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshAnalytics();
+      }
+    }, 60_000);
+
+    const scheduleEventRefresh = () => {
+      window.clearTimeout(eventRefreshTimer);
+      eventRefreshTimer = window.setTimeout(() => {
+        if (document.visibilityState === "visible") {
+          void refreshAnalytics();
+        }
+      }, 350);
+    };
+
+    const realtimeChannel = supabase
+      .channel("blog-admin-live-updates")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "openpage_articles",
+        },
+        scheduleEventRefresh
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "openpage_page_views",
+        },
+        scheduleEventRefresh
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "profiles",
+        },
+        scheduleEventRefresh
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "openpage_feedback",
+        },
+        scheduleEventRefresh
+      )
+      .subscribe((status) => {
+        const connected = status === "SUBSCRIBED";
+        setRealtimeConnected(connected);
+        if (!connected && status !== "CLOSED") {
+          console.error("Blog analytics realtime subscription status:", status);
+        }
+      });
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refreshAnalytics();
+      }
+    };
+
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("focus", refreshWhenVisible);
+
+    return () => {
+      window.clearTimeout(initialRefreshTimer);
+      window.clearTimeout(eventRefreshTimer);
+      window.clearInterval(refreshTimer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener("focus", refreshWhenVisible);
+      void supabase.removeChannel(realtimeChannel);
+    };
+  }, [refreshAnalytics]);
+
+  const startEditingArticle = (article: PublishedArticle) => {
+    setEditingArticle({
+      id: article.id,
+      title: article.title,
+      category: article.category,
+      author_name: article.author_name ?? "",
+    });
+    setArticleActionError(null);
+    setArticleActionMessage(null);
+  };
+
+  const saveArticle = async () => {
+    if (!editingArticle) return;
+
+    const title = editingArticle.title.trim();
+    const category = editingArticle.category.trim();
+
+    if (!title || !category) {
+      setArticleActionError("Article title and category are required.");
+      return;
+    }
+
+    setSavingArticleId(editingArticle.id);
+    setArticleActionError(null);
+    setArticleActionMessage(null);
+
+    try {
+      const { data, error } = await supabase
+        .from("openpage_articles")
+        .update({
+          title,
+          category,
+          author_name: editingArticle.author_name.trim() || null,
+        })
+        .eq("id", editingArticle.id)
+        .select("id");
+
+      if (error) throw error;
+      if (!data?.length) {
+        throw new Error(
+          "No article was updated. Check the OpenPage article update permissions."
+        );
+      }
+
+      setArticles((current) =>
+        current.map((article) =>
+          article.id === editingArticle.id
+            ? {
+                ...article,
+                title,
+                category,
+                author_name: editingArticle.author_name.trim() || null,
+              }
+            : article
+        )
+      );
+      setEditingArticle(null);
+      setArticleActionMessage("Article updated successfully.");
+    } catch (error) {
+      setArticleActionError(
+        error instanceof Error ? error.message : "Could not update the article."
+      );
+    } finally {
+      setSavingArticleId(null);
+    }
+  };
+
+  const deleteArticle = async (article: PublishedArticle) => {
+    if (
+      !window.confirm(
+        `Delete "${article.title}"? This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+
+    setDeletingArticleId(article.id);
+    setArticleActionError(null);
+    setArticleActionMessage(null);
+
+    try {
+      const { data, error } = await supabase
+        .from("openpage_articles")
+        .delete()
+        .eq("id", article.id)
+        .select("id");
+
+      if (error) throw error;
+      if (!data?.length) {
+        throw new Error(
+          "No article was deleted. Check the OpenPage article delete permissions."
+        );
+      }
+
+      setArticles((current) =>
+        current.filter((item) => item.id !== article.id)
+      );
+      if (editingArticle?.id === article.id) setEditingArticle(null);
+      setArticleActionMessage("Article deleted successfully.");
+    } catch (error) {
+      setArticleActionError(
+        error instanceof Error ? error.message : "Could not delete the article."
+      );
+    } finally {
+      setDeletingArticleId(null);
     }
   };
 
@@ -208,41 +390,144 @@ export default function BlogPage() {
               No published articles were found.
             </p>
           ) : (
+            <>
+            {articleActionError && (
+              <p role="alert" className="mb-4 rounded-lg bg-red-950 p-4 text-red-300">
+                {articleActionError}
+              </p>
+            )}
+            {articleActionMessage && (
+              <p role="status" className="mb-4 rounded-lg bg-emerald-950 p-4 text-emerald-300">
+                {articleActionMessage}
+              </p>
+            )}
             <ul className="divide-y divide-slate-800">
               {articles.map((article) => (
                 <li
                   key={article.id}
-                  className="flex flex-wrap items-center justify-between gap-4 py-4"
+                  className="flex flex-col justify-between gap-4 py-4 sm:flex-row sm:items-center"
                 >
-                  <div>
-                    <a
-                      href={`https://openpage-lime.vercel.app/articles/${encodeURIComponent(article.slug)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-medium text-white hover:text-cyan-300"
-                    >
-                      {article.title}
-                    </a>
-                    <p className="mt-1 text-sm text-slate-400">
-                      {article.category}
-                      {article.author_name ? ` · By ${article.author_name}` : ""}
-                    </p>
-                  </div>
-                  <time
-                    dateTime={article.published_at ?? article.created_at}
-                    className="text-sm text-slate-400"
-                  >
-                    {new Date(
-                      article.published_at ?? article.created_at
-                    ).toLocaleDateString("en-IN", {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}
-                  </time>
+                  {editingArticle?.id === article.id ? (
+                    <div className="grid w-full gap-3 md:grid-cols-3">
+                      <label className="text-sm text-slate-300">
+                        Title
+                        <input
+                          value={editingArticle.title}
+                          onChange={(event) =>
+                            setEditingArticle((current) =>
+                              current
+                                ? { ...current, title: event.target.value }
+                                : current
+                            )
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-400"
+                        />
+                      </label>
+                      <label className="text-sm text-slate-300">
+                        Category
+                        <input
+                          value={editingArticle.category}
+                          onChange={(event) =>
+                            setEditingArticle((current) =>
+                              current
+                                ? { ...current, category: event.target.value }
+                                : current
+                            )
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-400"
+                        />
+                      </label>
+                      <label className="text-sm text-slate-300">
+                        Author
+                        <input
+                          value={editingArticle.author_name}
+                          onChange={(event) =>
+                            setEditingArticle((current) =>
+                              current
+                                ? { ...current, author_name: event.target.value }
+                                : current
+                            )
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-400"
+                        />
+                      </label>
+                      <div className="flex flex-wrap gap-2 md:col-span-3">
+                        <button
+                          type="button"
+                          onClick={() => void saveArticle()}
+                          disabled={savingArticleId === article.id}
+                          className="rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950 disabled:opacity-60"
+                        >
+                          {savingArticleId === article.id
+                            ? "Saving…"
+                            : "Save"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingArticle(null)}
+                          disabled={savingArticleId === article.id}
+                          className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-white disabled:opacity-60"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <a
+                          href={`https://openpage-lime.vercel.app/articles/${encodeURIComponent(article.slug)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-white hover:text-cyan-300"
+                        >
+                          {article.title}
+                        </a>
+                        <p className="mt-1 text-sm text-slate-400">
+                          {article.category}
+                          {article.author_name
+                            ? ` · By ${article.author_name}`
+                            : ""}
+                        </p>
+                        <time
+                          dateTime={article.published_at ?? article.created_at}
+                          className="mt-1 block text-xs text-slate-500"
+                        >
+                          {new Date(
+                            article.published_at ?? article.created_at
+                          ).toLocaleDateString("en-IN", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })}
+                        </time>
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => startEditingArticle(article)}
+                          disabled={Boolean(savingArticleId || deletingArticleId)}
+                          className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-white hover:border-cyan-400 hover:text-cyan-300 disabled:opacity-50"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void deleteArticle(article)}
+                          disabled={Boolean(savingArticleId || deletingArticleId)}
+                          className="rounded-lg border border-red-900 px-3 py-2 text-sm text-red-300 hover:bg-red-950 disabled:opacity-50"
+                        >
+                          {deletingArticleId === article.id
+                            ? "Deleting…"
+                            : "Delete"}
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </li>
               ))}
             </ul>
+            </>
           )}
         </section>
 
@@ -250,7 +535,15 @@ export default function BlogPage() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-lg font-semibold">Data sources</h2>
             <p className="text-sm text-slate-400">
-              {lastUpdated ? `Updated at ${lastUpdated}` : "Not updated yet"}
+              {lastUpdated
+                ? `Updated at ${lastUpdated} · ${
+                    realtimeConnected
+                      ? "Live updates enabled"
+                      : "Checking for updates every minute"
+                  }`
+                : realtimeConnected
+                  ? "Live updates enabled"
+                  : "Checking for updates every minute"}
             </p>
           </div>
 
