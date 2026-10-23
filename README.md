@@ -16,6 +16,14 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Movie metadata
+
+The admin movie form reads the video title and thumbnail from a YouTube link.
+To automatically fetch IMDb ratings, add a server-side `OMDB_API_KEY` from
+[OMDb API](https://www.omdbapi.com/apikey.aspx) to `.env.local` and configure
+the same variable in your deployment environment. Keep this key private and
+do not prefix it with `NEXT_PUBLIC_`.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

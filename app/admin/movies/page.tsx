@@ -1,7 +1,13 @@
 
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
@@ -98,6 +104,9 @@ export default function ManageMoviesPage() {
   const [deletingId, setDeletingId] = useState<string | number | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [metadataLoading, setMetadataLoading] = useState(false);
+  const [metadataMessage, setMetadataMessage] = useState("");
+  const metadataRequest = useRef(0);
 
   const loadMovies = useCallback(async () => {
     setLoading(true);
@@ -126,14 +135,130 @@ useEffect(() => {
   void fetchMovies();
 }, [loadMovies]);
 
+  useEffect(() => {
+    const youtubeId = getYouTubeId(form.youtube_video_id);
+    const requestId = ++metadataRequest.current;
+
+    if (!youtubeId) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `/api/admin/movie-metadata?youtubeUrl=${encodeURIComponent(
+            form.youtube_video_id
+          )}`
+        );
+        const result: {
+          title?: string;
+          matchedTitle?: string;
+          posterUrl?: string;
+          rating?: string | null;
+          releaseYear?: string | null;
+          duration?: string | null;
+          description?: string | null;
+          genre?: string | null;
+          ratingMessage?: string | null;
+          error?: string;
+        } = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || "Could not fetch movie metadata.");
+        }
+        if (requestId !== metadataRequest.current) return;
+
+        setForm((current) => ({
+          ...current,
+          title: result.matchedTitle || result.title || current.title,
+          poster_url: result.posterUrl || current.poster_url,
+          rating: result.rating ?? current.rating,
+          release_year: result.releaseYear ?? current.release_year,
+          duration: result.duration ?? current.duration,
+          description: result.description ?? current.description,
+          genre: result.genre ?? current.genre,
+        }));
+        setMetadataMessage(
+          result.ratingMessage ??
+            "Movie title, YouTube thumbnail, and IMDb rating fetched."
+        );
+      } catch (err) {
+        if (requestId !== metadataRequest.current) return;
+        setMetadataMessage(
+          err instanceof Error
+            ? err.message
+            : "Could not fetch movie metadata."
+        );
+      } finally {
+        if (requestId === metadataRequest.current) {
+          setMetadataLoading(false);
+        }
+      }
+    }, 500);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [form.youtube_video_id]);
+
   function updateField(field: keyof MovieForm, value: string) {
+    if (field === "youtube_video_id") {
+      metadataRequest.current += 1;
+      const youtubeId = getYouTubeId(value);
+      setForm((current) => {
+        const previousId = getYouTubeId(current.youtube_video_id);
+        const videoChanged = previousId !== youtubeId;
+        return {
+          ...current,
+          [field]: value,
+          poster_url: youtubeId
+            ? `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`
+            : previousId &&
+                current.poster_url ===
+                  `https://i.ytimg.com/vi/${previousId}/hqdefault.jpg`
+              ? ""
+              : current.poster_url,
+          rating:
+            videoChanged
+              ? ""
+              : current.rating,
+          release_year:
+            videoChanged
+              ? ""
+              : current.release_year,
+          duration:
+            videoChanged
+              ? ""
+              : current.duration,
+          description:
+            videoChanged
+              ? ""
+              : current.description,
+          genre:
+            videoChanged
+              ? ""
+              : current.genre,
+          title:
+            videoChanged
+              ? ""
+              : current.title,
+        };
+      });
+      setMetadataLoading(Boolean(youtubeId));
+      setMetadataMessage(
+        youtubeId ? "Fetching video title and IMDb rating..." : ""
+      );
+      return;
+    }
+
     setForm((current) => ({ ...current, [field]: value }));
   }
 
   function resetForm() {
+    metadataRequest.current += 1;
     setForm(emptyForm);
     setEditingId(null);
     setVideoFile(null);
+    setMetadataLoading(false);
+    setMetadataMessage("");
 
     const input = document.getElementById(
       "movie-video-file"
@@ -143,7 +268,15 @@ useEffect(() => {
   }
 
   function startEditing(movie: Movie) {
+    metadataRequest.current += 1;
     setEditingId(movie.id);
+    const hasYouTubeVideo = Boolean(
+      getYouTubeId(movie.youtube_video_id ?? "")
+    );
+    setMetadataLoading(hasYouTubeVideo);
+    setMetadataMessage(
+      hasYouTubeVideo ? "Fetching video title and IMDb rating..." : ""
+    );
     setForm({
       title: movie.title ?? "",
       description: movie.description ?? "",
@@ -203,15 +336,23 @@ useEffect(() => {
       throw new Error("Video file must be 50 MB or smaller.");
     }
 
-    const body = new FormData();
-    body.append("file", file);
-
     const response = await fetch("/api/admin/upload", {
       method: "POST",
-      body,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fileName: file.name,
+        contentType: file.type,
+        fileSize: file.size,
+      }),
     });
 
-    const result = await response.json().catch(() => ({}));
+    const result: {
+      path?: string;
+      token?: string;
+      contentType?: string;
+      error?: string;
+      message?: string;
+    } = await response.json().catch(() => ({}));
 
     if (!response.ok) {
       throw new Error(
@@ -219,29 +360,24 @@ useEffect(() => {
       );
     }
 
-    const path =
-      result.path ??
-      result.video_path ??
-      result.videoPath ??
-      result.data?.path ??
-      result.data?.video_path;
-
-    const url =
-      result.publicUrl ??
-      result.public_url ??
-      result.url ??
-      result.data?.publicUrl ??
-      result.data?.public_url ??
-      result.data?.url;
-
-    if (!path && !url) {
+    if (!result.path || !result.token) {
       throw new Error(
-        "The upload API did not return a video path or URL. Check app/api/admin/upload/route.ts."
+        "The upload API did not return a signed upload path and token."
       );
     }
 
+    const { data, error: uploadError } = await supabase.storage
+      .from("movie-videos")
+      .uploadToSignedUrl(result.path, result.token, file, {
+        contentType: result.contentType ?? file.type,
+      });
+
+    if (uploadError) {
+      throw new Error(`Video upload failed: ${uploadError.message}`);
+    }
+
     return {
-      path: String(path ?? url),
+      path: data.path,
       source: "upload",
     };
   }
@@ -492,7 +628,7 @@ useEffect(() => {
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="grid gap-5 md:grid-cols-2">
               <label className="block text-sm">
-                Movie title *
+                Movie title * (auto-filled from YouTube)
                 <input
                   required
                   value={form.title}
@@ -513,7 +649,7 @@ useEffect(() => {
               </label>
 
               <label className="block text-sm">
-                Release year
+                Release year (auto-fetched)
                 <input
                   type="number"
                   min="1888"
@@ -526,7 +662,7 @@ useEffect(() => {
               </label>
 
               <label className="block text-sm">
-                Duration (minutes)
+                Duration in minutes (auto-fetched)
                 <input
                   type="number"
                   min="1"
@@ -538,7 +674,7 @@ useEffect(() => {
               </label>
 
               <label className="block text-sm">
-                Rating (0–10)
+                IMDb rating (0–10, auto-fetched)
                 <input
                   type="number"
                   min="0"
@@ -552,7 +688,7 @@ useEffect(() => {
               </label>
 
               <label className="block text-sm">
-                Poster image URL
+                Poster image URL (YouTube thumbnail)
                 <input
                   type="url"
                   value={form.poster_url}
@@ -564,7 +700,7 @@ useEffect(() => {
             </div>
 
             <label className="block text-sm">
-              Description
+              Description (auto-fetched)
               <textarea
                 rows={3}
                 value={form.description}
@@ -586,8 +722,20 @@ useEffect(() => {
                   placeholder="https://www.youtube.com/watch?v=..."
                 />
                 <span className="mt-2 block text-xs text-gray-500">
-                  Use a YouTube trailer or video link.
+                  Enter a YouTube link to automatically fill the title,
+                  thumbnail, IMDb rating, release year, duration, and
+                  description when the movie is found.
                 </span>
+                {metadataMessage && (
+                  <span
+                    aria-live="polite"
+                    className={`mt-2 block text-xs ${
+                      metadataLoading ? "text-gray-400" : "text-lime-300"
+                    }`}
+                  >
+                    {metadataMessage}
+                  </span>
+                )}
               </label>
 
               <label className="block text-sm">
@@ -608,11 +756,13 @@ useEffect(() => {
 
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || metadataLoading}
               className="rounded-xl bg-lime-400 px-6 py-3 font-bold text-black transition hover:bg-lime-300 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving
                 ? "Saving..."
+                : metadataLoading
+                  ? "Fetching details..."
                 : editingId !== null
                   ? "Save Changes"
                   : "Add Movie"}
@@ -645,19 +795,38 @@ useEffect(() => {
                   key={movie.id}
                   className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]"
                 >
-                  <div className="aspect-[3/2] bg-black/40">
+                  <div
+                    className="relative w-full overflow-hidden bg-black/40"
+                    style={{
+                      aspectRatio: "16 / 9",
+                    }}
+                  >
                     {movie.poster_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={movie.poster_url}
                         alt={`${movie.title} poster`}
-                        className="h-full w-full object-cover"
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          display: "block",
+                          width: "100%",
+                          height: "100%",
+                          maxWidth: "none",
+                          objectFit: "cover",
+                          objectPosition: "center",
+                        }}
                       />
                     ) : (
                       <div className="flex h-full items-center justify-center text-gray-600">
                         No poster available
                       </div>
                     )}
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/70 to-transparent px-3 pb-3 pt-12">
+                      <p className="line-clamp-2 text-center text-sm font-bold text-white drop-shadow-lg">
+                        {movie.title}
+                      </p>
+                    </div>
                   </div>
 
                   <div className="p-5">

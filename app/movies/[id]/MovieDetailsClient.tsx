@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -117,6 +118,7 @@ export default function MovieDetailsClient() {
 
   const [movie, setMovie] = useState<Movie | null>(null);
   const [poster, setPoster] = useState<string | null>(null);
+  const [uploadedVideoUrl, setUploadedVideoUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showTrailer, setShowTrailer] = useState(false);
@@ -126,38 +128,63 @@ export default function MovieDetailsClient() {
 
     async function loadMovie() {
       try {
+        const [authResult, movieResult] = await Promise.all([
+          supabase.auth.getUser(),
+          supabase
+            .from("movies")
+            .select("*")
+            .eq("id", id)
+            .maybeSingle(),
+        ]);
+
         const {
           data: { user },
           error: authError,
-        } = await supabase.auth.getUser();
-
+        } = authResult;
         if (authError || !user) {
           router.replace("/login");
           return;
         }
 
-        const { data, error: movieError } = await supabase
-          .from("movies")
-          .select("*")
-          .eq("id", id)
-          .maybeSingle();
-
-        if (movieError) {
-          throw new Error(movieError.message);
+        if (movieResult.error) {
+          throw new Error(movieResult.error.message);
         }
 
-        if (!data) {
+        if (!movieResult.data) {
           throw new Error("Movie not found.");
         }
 
-        const foundMovie = data as Movie;
+        const foundMovie = movieResult.data as Movie;
         const localPoster = getLocalPoster(foundMovie.title);
         const posterUrl =
           localPoster || (await getPosterUrl(foundMovie.poster_url));
+        let videoUrl: string | null = null;
+
+        if (
+          foundMovie.video_source?.trim().toLowerCase() === "upload" &&
+          foundMovie.video_path
+        ) {
+          if (/^https?:\/\//i.test(foundMovie.video_path)) {
+            videoUrl = foundMovie.video_path;
+          } else {
+            const { data: videoData, error: videoError } =
+              await supabase.storage
+                .from("movie-videos")
+                .createSignedUrl(foundMovie.video_path, 3600);
+
+            if (videoError) {
+              throw new Error(
+                `Could not access the uploaded video: ${videoError.message}`
+              );
+            }
+            videoUrl = videoData.signedUrl;
+          }
+        }
 
         if (!cancelled) {
           setMovie(foundMovie);
           setPoster(posterUrl);
+          setUploadedVideoUrl(videoUrl);
         }
       } catch (err) {
         console.error("Could not load movie:", err);
@@ -212,16 +239,51 @@ export default function MovieDetailsClient() {
   const source = movie.video_source?.trim().toLowerCase();
   const trailerId =
     source === "youtube" ? getYouTubeId(movie.youtube_video_id) : null;
+  const hasPlayableVideo =
+    Boolean(trailerId) ||
+    (source === "upload" && Boolean(uploadedVideoUrl));
 
   return (
     <main className="min-h-screen bg-[#080b10] text-white">
       <section className="bg-gradient-to-br from-[#101b34] via-[#06202a] to-black px-6 py-12 sm:py-16">
-        <div className="mx-auto grid max-w-7xl items-center gap-10 md:grid-cols-[384px_1fr] md:gap-16">
-          <div className="flex aspect-[3/4] w-full max-w-sm items-center justify-center overflow-hidden rounded-3xl border border-white/15 bg-[#181818]">
-            {poster ? (
-              <img
+        <div
+          className={`mx-auto grid max-w-7xl items-center gap-10 md:gap-16 ${
+            showTrailer ? "grid-cols-1" : "md:grid-cols-[384px_1fr]"
+          }`}
+        >
+          <div
+            className={`relative w-full overflow-hidden rounded-3xl border border-white/15 bg-[#181818] ${
+              showTrailer ? "" : "max-w-sm"
+            }`}
+            style={{
+              aspectRatio: "16 / 9",
+            }}
+          >
+            {showTrailer && trailerId ? (
+              <iframe
+                src={`https://www.youtube-nocookie.com/embed/${trailerId}?autoplay=1`}
+                title={`${movie.title} trailer`}
+                className="absolute inset-0 h-full w-full"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                referrerPolicy="strict-origin-when-cross-origin"
+                allowFullScreen
+              />
+            ) : showTrailer && uploadedVideoUrl ? (
+              <video
+                src={uploadedVideoUrl}
+                title={`${movie.title} video`}
+                className="absolute inset-0 h-full w-full bg-black object-contain"
+                controls
+                autoPlay
+                playsInline
+              />
+            ) : poster ? (
+              <Image
                 src={poster}
                 alt={`${movie.title} poster`}
+                fill
+                sizes="(max-width: 768px) 100vw, 384px"
+                unoptimized
                 onError={() => {
                   const localPoster = getLocalPoster(movie.title);
 
@@ -231,12 +293,52 @@ export default function MovieDetailsClient() {
                     setPoster(null);
                   }
                 }}
-                className="h-full w-full object-cover"
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  width: "100%",
+                  height: "100%",
+                  maxWidth: "none",
+                  objectFit: "cover",
+                  objectPosition: "center",
+                }}
               />
             ) : (
-              <div className="flex flex-col items-center gap-4">
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
                 <span className="text-6xl">{movie.emoji || "🎬"}</span>
                 <span className="font-bold">{movie.title}</span>
+                {hasPlayableVideo && (
+                  <button
+                    type="button"
+                    onClick={() => setShowTrailer(true)}
+                    aria-label={`Play ${movie.title} trailer`}
+                    className="rounded-full bg-lime-400 px-5 py-3 font-bold text-black"
+                  >
+                    ▶ Play trailer
+                  </button>
+                )}
+              </div>
+            )}
+            {hasPlayableVideo && !showTrailer && poster && (
+              <button
+                type="button"
+                onClick={() => setShowTrailer(true)}
+                aria-label={`Play ${movie.title} trailer`}
+                className="absolute inset-0 flex items-center justify-center bg-black/15 transition hover:bg-black/35"
+              >
+                <span
+                  aria-hidden="true"
+                  className="flex h-16 w-16 items-center justify-center rounded-full bg-lime-400 text-2xl text-black shadow-lg transition hover:scale-110"
+                >
+                  ▶
+                </span>
+              </button>
+            )}
+            {!showTrailer && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/70 to-transparent px-4 pb-5 pt-16">
+                <p className="text-center text-xl font-bold text-white drop-shadow-lg">
+                  {movie.title}
+                </p>
               </div>
             )}
           </div>
@@ -280,17 +382,9 @@ export default function MovieDetailsClient() {
               {movie.description || "Discover this movie on ColdStar OTT."}
             </p>
 
-            {trailerId ? (
-              <button
-                onClick={() => setShowTrailer((current) => !current)}
-                aria-expanded={showTrailer}
-                className="mt-7 rounded-xl bg-lime-400 px-6 py-4 font-bold text-black transition hover:bg-lime-300"
-              >
-                ▶ {showTrailer ? "Hide Trailer" : "Watch Trailer"}
-              </button>
-            ) : (
+            {!hasPlayableVideo && (
               <p className="mt-7 rounded-xl border border-white/10 bg-white/[0.03] px-5 py-4 text-sm text-zinc-400">
-                No YouTube trailer has been added for this movie yet.
+                No playable video has been added for this movie yet.
               </p>
             )}
 
@@ -304,24 +398,6 @@ export default function MovieDetailsClient() {
         </div>
       </section>
 
-      {showTrailer && trailerId && (
-        <section className="mx-auto max-w-7xl px-6 py-10">
-          <h2 className="mb-5 text-2xl font-bold">
-            Official Trailer — {movie.title}
-          </h2>
-
-          <div className="aspect-video overflow-hidden rounded-2xl border border-white/10 bg-black">
-            <iframe
-              src={`https://www.youtube-nocookie.com/embed/${trailerId}`}
-              title={`${movie.title} trailer`}
-              className="h-full w-full"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              referrerPolicy="strict-origin-when-cross-origin"
-              allowFullScreen
-            />
-          </div>
-        </section>
-      )}
     </main>
   );
 }

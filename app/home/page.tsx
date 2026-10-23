@@ -49,6 +49,7 @@ export default function HomePage() {
 
   const [movies, setMovies] = useState<Movie[]>([]);
   const [search, setSearch] = useState("");
+  const [selectedGenre, setSelectedGenre] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
@@ -71,29 +72,30 @@ export default function HomePage() {
           return;
         }
 
-        // Check the existing admin role.
-        const { data: profile, error: profileError } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .maybeSingle();
+        const [profileResult, moviesResult] = await Promise.all([
+          supabase
+            .from("profiles")
+            .select("role")
+            .eq("id", user.id)
+            .maybeSingle(),
+          supabase
+            .from("movies")
+            .select("*")
+            .order("created_at", { ascending: false }),
+        ]);
 
         if (cancelled) return;
 
-        setIsAdmin(!profileError && profile?.role === "admin");
+        setIsAdmin(
+          !profileResult.error && profileResult.data?.role === "admin"
+        );
         setCheckingUser(false);
 
-        // Load movie records.
-        const { data, error: moviesError } = await supabase
-          .from("movies")
-          .select("*")
-          .order("created_at", { ascending: false });
-
-        if (moviesError) {
-          throw new Error(moviesError.message);
+        if (moviesResult.error) {
+          throw new Error(moviesResult.error.message);
         }
 
-        const movieList = (data ?? []) as Movie[];
+        const movieList = (moviesResult.data ?? []) as Movie[];
 
         // Load each movie's poster.
         const moviesWithPosters = await Promise.all(
@@ -140,11 +142,31 @@ export default function HomePage() {
 
   const query = search.trim().toLowerCase();
 
-  const filteredMovies = movies.filter(
-    (movie) =>
-      movie.title.toLowerCase().includes(query) ||
-      (movie.genre ?? "").toLowerCase().includes(query)
+  const genres = Array.from(
+    new Set(
+      movies
+        .flatMap((movie) =>
+          (movie.genre ?? "")
+            .split(",")
+            .map((genre) => genre.trim())
+            .filter(Boolean)
+        )
+        .sort((left, right) => left.localeCompare(right))
+    )
   );
+
+  const filteredMovies = movies.filter((movie) => {
+    const matchesQuery =
+      movie.title.toLowerCase().includes(query) ||
+      (movie.genre ?? "").toLowerCase().includes(query);
+    const matchesGenre =
+      !selectedGenre ||
+      (movie.genre ?? "")
+        .split(",")
+        .some((genre) => genre.trim() === selectedGenre);
+
+    return matchesQuery && matchesGenre;
+  });
 
   return (
     <main className="min-h-screen bg-[#080b10] text-white">
@@ -153,6 +175,7 @@ export default function HomePage() {
           <button
             type="button"
             onClick={() => router.push("/home")}
+            aria-label="ColdStar home"
             className="text-2xl font-black tracking-tight"
           >
             COLD<span className="text-lime-400">STAR</span>
@@ -190,14 +213,13 @@ export default function HomePage() {
                       🎬 Manage Movies
                     </Link>
 
-                    <a
+                    <Link
                       href="/admin/blog"
-                      rel="noopener noreferrer"
                       onClick={() => setAdminMenuOpen(false)}
                       className="block rounded-lg px-4 py-3 text-sm transition hover:bg-white/10 hover:text-lime-400"
                     >
                       📰 Manage OpenPage
-                    </a>
+                    </Link>
                   </div>
                 )}
               </div>
@@ -249,15 +271,13 @@ export default function HomePage() {
                   🎬 Manage Movies
                 </Link>
 
-                <a
-                  href="https://openpage-lime.vercel.app/admin"
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <Link
+                  href="/admin/blog"
                   onClick={() => setMobileMenuOpen(false)}
                   className="block rounded-lg px-3 py-3 text-sm hover:bg-white/10"
                 >
                   📰 Manage OpenPage
-                </a>
+                </Link>
               </div>
             )}
 
@@ -272,8 +292,8 @@ export default function HomePage() {
         )}
       </header>
 
-      <section className="mx-auto max-w-7xl px-5 py-12">
-        <div className="mb-10 rounded-3xl border border-white/10 bg-gradient-to-br from-lime-400/10 to-transparent p-7 sm:p-12">
+      <section className="mx-auto max-w-7xl px-5 py-8 sm:py-12">
+        <div className="mb-10 overflow-hidden rounded-3xl border border-white/10 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-lime-400/15 via-[#101720] to-[#080b10] p-6 sm:p-12">
           <p className="mb-3 text-sm font-semibold tracking-[0.25em] text-lime-400">
             YOUR ENTERTAINMENT UNIVERSE
           </p>
@@ -286,23 +306,77 @@ export default function HomePage() {
             Discover your next favourite movie with ColdStar OTT.
           </p>
 
-          <div className="mt-7 max-w-lg">
+          <div className="mt-7 flex max-w-2xl gap-3">
             <input
               type="search"
+              aria-label="Search movies by title or genre"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search movies or genres..."
-              className="w-full rounded-xl border border-white/15 bg-black/40 px-5 py-4 outline-none focus:border-lime-400"
+              className="min-w-0 flex-1 rounded-xl border border-white/15 bg-black/40 px-5 py-4 outline-none transition placeholder:text-gray-500 focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20"
             />
+            {(search || selectedGenre) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch("");
+                  setSelectedGenre("");
+                }}
+                className="rounded-xl border border-white/15 px-4 text-sm font-semibold text-gray-300 transition hover:border-lime-400 hover:text-lime-300"
+              >
+                Clear
+              </button>
+            )}
           </div>
         </div>
 
-        <div className="mb-6 flex items-center justify-between">
-          <h2 className="text-2xl font-bold">Explore Movies</h2>
-          <span className="text-sm text-gray-500">
-            {filteredMovies.length} movies
+        <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-lime-400">
+              Your collection
+            </p>
+            <h2 className="mt-1 text-2xl font-bold">Explore Movies</h2>
+          </div>
+          <span aria-live="polite" className="text-sm text-gray-400">
+            {filteredMovies.length} of {movies.length} movies
           </span>
         </div>
+
+        {genres.length > 0 && (
+          <div className="mb-7 flex gap-2 overflow-x-auto pb-2">
+            <button
+              type="button"
+              aria-pressed={!selectedGenre}
+              onClick={() => setSelectedGenre("")}
+              className={`shrink-0 rounded-full border px-4 py-2 text-sm transition ${
+                !selectedGenre
+                  ? "border-lime-400 bg-lime-400 text-black"
+                  : "border-white/15 text-gray-300 hover:border-lime-400/60"
+              }`}
+            >
+              All genres
+            </button>
+            {genres.map((genre) => (
+              <button
+                key={genre}
+                type="button"
+                aria-pressed={selectedGenre === genre}
+                onClick={() =>
+                  setSelectedGenre((current) =>
+                    current === genre ? "" : genre
+                  )
+                }
+                className={`shrink-0 rounded-full border px-4 py-2 text-sm transition ${
+                  selectedGenre === genre
+                    ? "border-lime-400 bg-lime-400 text-black"
+                    : "border-white/15 text-gray-300 hover:border-lime-400/60"
+                }`}
+              >
+                {genre}
+              </button>
+            ))}
+          </div>
+        )}
 
         {loading && (
           <p className="py-12 text-center text-gray-400">
@@ -317,30 +391,48 @@ export default function HomePage() {
         )}
 
         {!loading && !error && filteredMovies.length === 0 && (
-          <p className="py-12 text-center text-gray-400">
-            No movies found. Try another search.
-          </p>
+          <div className="rounded-2xl border border-dashed border-white/15 px-6 py-14 text-center">
+            <p className="text-lg font-semibold text-white">No movies found</p>
+            <p className="mt-2 text-sm text-gray-400">
+              Try another title or genre, or clear your filters.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                setSelectedGenre("");
+              }}
+              className="mt-5 rounded-lg bg-lime-400 px-4 py-2 text-sm font-bold text-black transition hover:bg-lime-300"
+            >
+              Clear filters
+            </button>
+          </div>
         )}
 
         {!loading && !error && filteredMovies.length > 0 && (
-          <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-5 lg:grid-cols-4 xl:grid-cols-5">
             {filteredMovies.map((movie) => {
               const poster = movie.poster_display_url;
 
               return (
-                <button
+                <Link
                   key={movie.id}
-                  type="button"
-                  onClick={() => router.push(`/movies/${movie.id}`)}
-                  className="group overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] text-left transition hover:-translate-y-1 hover:border-lime-400/60"
+                  href={`/movies/${movie.id}`}
+                  aria-label={`View ${movie.title} movie details`}
+                  className="group overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] text-left transition duration-200 hover:-translate-y-1 hover:border-lime-400/60 hover:shadow-[0_16px_50px_rgba(163,230,53,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-400"
                 >
-                  <div className="relative aspect-[3/4] overflow-hidden bg-[#151a20]">
+                  <div
+                    className="relative overflow-hidden bg-[#151a20]"
+                    style={{
+                      aspectRatio: "16 / 9",
+                    }}
+                  >
                     {poster && (
                       <Image
                         src={poster}
                         alt={`${movie.title} poster`}
-                        width={300}
-                        height={400}
+                        fill
+                        sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
                         unoptimized
                         onError={(event) => {
                           event.currentTarget.style.display = "none";
@@ -354,7 +446,16 @@ export default function HomePage() {
                             placeholder.style.display = "flex";
                           }
                         }}
-                        className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                        className="transition duration-300 group-hover:scale-105"
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          width: "100%",
+                          height: "100%",
+                          maxWidth: "none",
+                          objectFit: "cover",
+                          objectPosition: "center",
+                        }}
                       />
                     )}
 
@@ -364,24 +465,38 @@ export default function HomePage() {
                     >
                       {movie.emoji || "🎬"}
                     </span>
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/70 to-transparent px-3 pb-3 pt-12">
+                      <p className="line-clamp-2 text-center text-sm font-bold text-white drop-shadow-lg">
+                        {movie.title}
+                      </p>
+                    </div>
                   </div>
 
-                  <div className="p-4">
-                    <h3 className="truncate font-bold">{movie.title}</h3>
-
-                    <p className="mt-2 text-xs text-gray-400">
+                  <div className="p-3 sm:p-4">
+                    <p className="truncate text-sm font-semibold text-gray-300">
                       {[movie.release_year, movie.genre]
                         .filter(Boolean)
                         .join(" · ") || "Movie"}
                     </p>
 
-                    {movie.rating != null && (
-                      <p className="mt-3 text-sm text-lime-400">
-                        ★ {movie.rating}
+                    {movie.description && (
+                      <p className="mt-2 line-clamp-2 text-xs leading-5 text-gray-500">
+                        {movie.description}
                       </p>
                     )}
+
+                    <div className="mt-3 flex min-h-7 items-center justify-between gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                        View details
+                      </span>
+                      {movie.rating != null && (
+                        <span className="shrink-0 rounded-md bg-lime-400/10 px-2 py-1 text-sm font-bold text-lime-300">
+                          ★ {movie.rating}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </button>
+                </Link>
               );
             })}
           </div>
