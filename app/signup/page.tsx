@@ -1,17 +1,20 @@
-
 "use client";
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 export default function SignupPage() {
+  const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [registeringPasskey, setRegisteringPasskey] = useState(false);
+  const [passkeySetup, setPasskeySetup] = useState(false);
 
   async function handleSignup(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -40,18 +43,47 @@ export default function SignupPage() {
 
       if (!data.session) {
         setMessage(
-          "Account created! Check your email to verify your account, then log in."
+          "Account created! Verify your email, then log in and register face/device sign-in."
         );
         setSuccess(true);
         return;
       }
 
-      // A session exists, so the user can go to the homepage.
-      window.location.assign("/");
+      setPasskeySetup(true);
+      setMessage("Account created. Register face/device sign-in to finish setup.");
+      setSuccess(true);
     } catch {
       setMessage("Unable to register. Please try again.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handlePasskeyRegistration() {
+    setMessage("");
+    setRegisteringPasskey(true);
+
+    try {
+      const { error } = await supabase.auth.registerPasskey();
+
+      if (error) {
+        setMessage(
+          `Passkey setup did not finish: ${error.message}. You can still continue with email and password.`
+        );
+        setSuccess(false);
+        return;
+      }
+
+      router.replace("/home");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? `Passkey setup did not finish: ${error.message}`
+          : "Passkey setup did not finish. You can still use email and password."
+      );
+      setSuccess(false);
+    } finally {
+      setRegisteringPasskey(false);
     }
   }
 
@@ -79,7 +111,8 @@ export default function SignupPage() {
               Create account
             </h2>
             <p className="mt-2 text-sm text-zinc-400">
-              Your next story starts here.
+              Create your account, then set up face/device sign-in. Your face
+              stays on your device.
             </p>
           </div>
 
@@ -147,14 +180,38 @@ export default function SignupPage() {
               </p>
             )}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-lg bg-lime-400 py-3 font-semibold text-black transition hover:bg-lime-300 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {loading ? "Creating account..." : "Create account"}
-            </button>
+            {!passkeySetup && (
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full rounded-lg bg-lime-400 py-3 font-semibold text-black transition hover:bg-lime-300 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {loading ? "Creating account..." : "Create account"}
+              </button>
+            )}
           </form>
+
+          {passkeySetup && (
+            <div className="mt-5 space-y-3">
+              <button
+                type="button"
+                onClick={() => void handlePasskeyRegistration()}
+                disabled={registeringPasskey}
+                className="w-full rounded-lg bg-lime-400 py-3 font-semibold text-black transition hover:bg-lime-300 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {registeringPasskey
+                  ? "Setting up face/device sign-in..."
+                  : "Register face/device sign-in"}
+              </button>
+              <button
+                type="button"
+                onClick={() => router.replace("/home")}
+                className="w-full rounded-lg border border-zinc-700 py-3 text-sm text-zinc-300 transition hover:border-zinc-500"
+              >
+                Continue with email and password
+              </button>
+            </div>
+          )}
 
           <p className="mt-6 text-center text-sm text-zinc-500">
             Already have an account?{" "}
